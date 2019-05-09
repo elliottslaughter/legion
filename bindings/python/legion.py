@@ -158,6 +158,8 @@ def input_args(filter_runtime_options=False):
 # corresponds to one and only one thread.
 _my = threading.local()
 
+global_task_registration_barrier = None
+
 class Context(object):
     __slots__ = ['context_root', 'context', 'runtime_root', 'runtime',
                  'task_root', 'task', 'regions',
@@ -1183,11 +1185,17 @@ class Task (object):
         c_qualname_comps = [ffi.new('char []', comp.encode('utf-8')) for comp in qualname]
         c_qualname = ffi.new('char *[]', c_qualname_comps)
 
+        global global_task_registration_barrier
+        if global_task_registration_barrier is not None:
+            c.legion_phase_barrier_arrive(_my.ctx.runtime, _my.ctx.context, global_task_registration_barrier, 1)
+            global_task_registration_barrier = c.legion_phase_barrier_advance(_my.ctx.runtime, _my.ctx.context, global_task_registration_barrier)
+            c.legion_phase_barrier_wait(_my.ctx.runtime, _my.ctx.context, global_task_registration_barrier)
+
         c.legion_runtime_register_task_variant_python_source_qualname(
             c.legion_runtime_get_runtime(),
             task_id,
-            task_name.encode('utf-8'),
-            False, # Global
+            task_name.encode('utf-8') if top_level_task else ffi.NULL,
+            top_level_task, # Global
             execution_constraints,
             layout_constraints,
             options[0],
@@ -1196,6 +1204,11 @@ class Task (object):
             len(qualname),
             ffi.NULL,
             0)
+
+        if global_task_registration_barrier is not None:
+            c.legion_phase_barrier_arrive(_my.ctx.runtime, _my.ctx.context, global_task_registration_barrier, 1)
+            global_task_registration_barrier = c.legion_phase_barrier_advance(_my.ctx.runtime, _my.ctx.context, global_task_registration_barrier)
+            c.legion_phase_barrier_wait(_my.ctx.runtime, _my.ctx.context, global_task_registration_barrier)
 
         c.legion_execution_constraint_set_destroy(execution_constraints)
         c.legion_task_layout_constraint_set_destroy(layout_constraints)
@@ -1542,6 +1555,11 @@ if is_script:
 
     @task(top_level=True, replicable=True)
     def legion_main():
+        # FIXME: Really this should be the number of control replicated shards at this level
+        global global_task_registration_barrier
+        num_procs = Tunable.select(Tunable.GLOBAL_PYS).get()
+        global_task_registration_barrier = c.legion_phase_barrier_create(_my.ctx.runtime, _my.ctx.context, num_procs)
+
         args = input_args(True)
         assert len(args) >= 2
         sys.argv = list(args)
