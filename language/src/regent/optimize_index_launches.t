@@ -134,6 +134,31 @@ local function check_index_noninterference_self(cx, arg)
     return true
   end
 
+  -- Easy Ctor case: index is superset of loop variable fields
+  -- Can only recognize Ctor when compiled with flag -fflow 0
+  if (index:is(ast.typed.expr.Ctor)) then
+    local index_type = cx.loop_index:gettype()
+
+    if index_type.fields then
+      for _, loop_index_field in ipairs(index_type.fields) do
+        local accessed = false
+        for i, ctor_field in ipairs(index.fields) do
+	  local ctor_val = ctor_field.value
+	  if ctor_val:is(ast.typed.expr.FieldAccess)
+             and loop_index_field == ctor_val.field_name
+	     and cx.loop_index == ctor_val.value.value then
+            accessed = true
+            break
+	  end
+        end
+        if not accessed then
+          return false
+        end
+      end
+      return true
+    end
+  end
+
   -- FIXME: Do a proper affine analysis of the index expression.
 
   -- Otherwise return false.
