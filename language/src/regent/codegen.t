@@ -2835,7 +2835,7 @@ local function strip_casts(node)
   return node
 end
 
-local function make_partition_projection_functor(cx, expr, loop_index, color_space)
+local function make_partition_projection_functor(cx, expr, loop_index, color_space, free_vars_setup, requirement)
   -- We assume that there's only one variable, and that it's the loop index.
 
   assert(expr:is(ast.typed.expr.IndexAccess))
@@ -2875,19 +2875,37 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
 
   -- Generate a projection functor that evaluates `expr`.
   local value = codegen.expr(cx, index):read(cx)
-  local terra partition_functor(runtime : c.legion_runtime_t,
-                                parent : c.legion_logical_partition_t,
-                                [point],
-                                launch : c.legion_domain_t)
-    [symbol_setup];
+
+  free_vars_setup:insert(quote
     [value.actions];
+  end)
+  -- DELETE ME
+  print("codegen.t make_partition_projection_functor: index:")
+  print(value.value)
+  print("codegen.t make_partition_projection_functor: free_vars_setup:")
+  for k,v in ipairs(free_vars_setup) do
+    print(k,v)
+  end
+  --print("codegen.t make_partition_projection_functor: value.actions:")
+  --print(value.actions)
+
+  local terra partition_functor(runtime : c.legion_runtime_t,
+                                mappable : c.legion_mappable_t,
+                                idx : uint,
+                                parent : c.legion_logical_partition_t,
+                                [point])
+    var task = c.legion_mappable_as_task(mappable)
+    var [requirement] = c.legion_task_get_region(task, idx)
+    [symbol_setup];
+    [free_vars_setup];
+    --[value.actions];
     var index : index_type = [value.value];
     var subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
       runtime, parent, index)
     return subregion
   end
 
-  return std.register_projection_functor(false, true, 0, nil, partition_functor)
+  return std.register_projection_functor(false, false, 0, nil, partition_functor)
 end
 
 local function add_region_fields(cx, arg_type, field_paths, field_types, launcher, index)
@@ -3166,15 +3184,59 @@ local function expr_call_setup_list_of_regions_arg(
 end
 
 local function expr_call_setup_partition_arg(
-    cx, task, arg_value, arg_type, param_type, partition, loop_index, launcher, index, args_setup)
+    cx, task, arg_value, arg_type, param_type, partition, loop_index, launcher, index, args_setup, free_vars)
   assert(index)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
     std.find_task_privileges(param_type, task)
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
+
+  local free_vars_struct = terralib.types.newstruct()
+  free_vars_struct.entries = terralib.newlist()
+  for i,symbol in ipairs(free_vars) do
+    free_vars_struct.entries:insert(
+      { field = tostring(symbol), type = symbol:gettype() })
+  end
+
+  local free_vars_setup = terralib.newlist()
+  local get_args = c.legion_index_launcher_get_projection_args
+  local proj_args_get = terralib.newsymbol(free_vars_struct, "proj_args")
+  local reg_requirement = terralib.newsymbol(c.legion_region_requirement_t, "requirement")
+  free_vars_setup:insert(
+    quote
+      var [proj_args_get] = @[&free_vars_struct]([get_args]([reg_requirement], nil))
+    end)
+  for i,symbol in ipairs(free_vars) do
+    print("BLERP:")
+    for k,v in pairs(symbol) do
+      print(k,v)
+    end
+    free_vars_setup:insert(
+      quote
+--        var [free_vars_symbols[i]] = @[proj_args_get].[tostring(symbol)]
+        var [symbol:getsymbol()] = [proj_args_get].[tostring(symbol)]
+      end)
+  end
+
+  local set_args = c.legion_index_launcher_set_projection_args
+  local proj_args_set = terralib.newsymbol(free_vars_struct, "proj_args")
+  args_setup:insert(
+    quote
+      var [proj_args_set]
+    end)
+  for i,symbol in ipairs(free_vars) do
+    args_setup:insert(
+      quote
+        [proj_args_set].[tostring(symbol)] = [symbol:getsymbol()]
+      end)
+  end
+  print("codegen.t set args:")
+  for k,v in pairs(args_setup) do
+    print(k,v)
+  end
+
   local parent_region =
     cx:region(cx:region(arg_type).root_region_type).logical_region
-
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
     local field_types = privilege_field_types[i]
@@ -3202,7 +3264,7 @@ local function expr_call_setup_partition_arg(
     end
     assert(add_requirement)
 
-    local projection_functor = make_partition_projection_functor(cx, arg_value, loop_index)
+    local projection_functor = make_partition_projection_functor(cx, arg_value, loop_index, false, free_vars_setup, reg_requirement)
 
     local requirement = terralib.newsymbol(uint, "requirement")
     local requirement_args = terralib.newlist({
@@ -3223,6 +3285,7 @@ local function expr_call_setup_partition_arg(
         var [requirement] = [add_requirement]([requirement_args])
         [add_fields]([launcher], [requirement], &[cx:region(arg_type).field_id_array])
         c.legion_index_launcher_add_flags([launcher], [requirement], [flag])
+        [set_args]([launcher], [requirement], [&opaque](&[proj_args_set]), terralib.sizeof(free_vars_struct), false)
       end)
   end
 end
@@ -8820,6 +8883,15 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   local preamble = node.preamble:map(function(stat) return codegen.stat(cx, stat) end)
   local has_preamble = #preamble > 0
 
+  -- DELETE ME
+  print("codegen index launch free vars:")
+  for k,v in ipairs(node.free_vars) do
+    print(k..':')
+    for l,u in ipairs(v) do
+      print("  "..l,u)
+    end
+  end
+
   local fn = codegen.expr(cx, node.call.fn):read(cx)
   assert(std.is_task(fn.value))
   local args = terralib.newlist()
@@ -8994,7 +9066,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       assert(partition)
       expr_call_setup_partition_arg(
         cx, fn.value, node.call.args[i], arg_type, param_type, partition.value, node.symbol, launcher, true,
-        args_setup)
+        args_setup, node.free_vars[i])
     end
   end
 
