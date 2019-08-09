@@ -2691,6 +2691,15 @@ local function expr_call_setup_task_args(
   task_args_cleanup:insert(quote
     c.free([buffer])
   end)
+  -- DELETE ME
+  print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
+  print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% task_args_setup begin %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
+  print("codegen expr_call_setup_task_args task_args_setup:")
+  for k,v in ipairs(task_args_setup) do
+    print(k,v)
+  end
+  print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% task_args_setup end %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
+  print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
 end
 
 local function expr_call_setup_future_arg(
@@ -2843,8 +2852,10 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
   -- Strip the index for the purpose of checking if this is the
   -- identity projection functor.
   local stripped_index = strip_casts(expr.index)
-  if stripped_index:is(ast.typed.expr.ID) then
-    assert(stripped_index.value == loop_index)
+--  if stripped_index:is(ast.typed.expr.ID) then
+--    assert(stripped_index.value == loop_index)
+  if stripped_index:is(ast.typed.expr.ID)
+     and stripped_index.value == loop_index then
     return 0 -- Identity projection functor.
   end
 
@@ -3184,7 +3195,7 @@ local function expr_call_setup_list_of_regions_arg(
 end
 
 local function expr_call_setup_partition_arg(
-    cx, task, arg_value, arg_type, param_type, partition, loop_index, launcher, index, args_setup, free_vars)
+    cx, task, arg_value, arg_type, param_type, partition, loop_index, launcher, index, args_setup, free_vars, loop_vars_setup)
   assert(index)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
     std.find_task_privileges(param_type, task)
@@ -3217,6 +3228,7 @@ local function expr_call_setup_partition_arg(
         var [symbol:getsymbol()] = [proj_args_get].[tostring(symbol)]
       end)
   end
+  free_vars_setup:insertall(loop_vars_setup)
 
   local set_args = c.legion_index_launcher_set_projection_args
   local proj_args_set = terralib.newsymbol(free_vars_struct, "proj_args")
@@ -8881,6 +8893,9 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   local symbol = node.symbol:getsymbol()
   local cx = cx:new_local_scope()
   local preamble = node.preamble:map(function(stat) return codegen.stat(cx, stat) end)
+  -- DELETE ME
+  --local loop_vars = preamble
+  local loop_vars = node.loop_vars:map(function(stat) return codegen.stat(cx, stat) end)
   local has_preamble = #preamble > 0
 
   -- DELETE ME
@@ -9066,7 +9081,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       assert(partition)
       expr_call_setup_partition_arg(
         cx, fn.value, node.call.args[i], arg_type, param_type, partition.value, node.symbol, launcher, true,
-        args_setup, node.free_vars[i])
+        args_setup, node.free_vars[i], loop_vars)
     end
   end
 
@@ -9137,6 +9152,9 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       c.legion_domain_point_iterator_destroy(it)
     end
   end
+
+  print("codegen.t: launcher setup")
+  launcher_setup:printpretty()
 
   local execute_fn = c.legion_index_launcher_execute
   local execute_args = terralib.newlist({

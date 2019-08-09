@@ -98,7 +98,7 @@ local function evaluate(node)
   return value
 end
 
-function convert_constant_expr(node)
+function affine.convert_constant_expr(node)
   if node:is(ast.typed.expr.Constant) then
     return convert_terra_constant(node.value)
   elseif node:is(ast.typed.expr.Ctor) then
@@ -166,8 +166,11 @@ function affine.analyze_index_noninterference_self(loop_index, arg, field_name)
 
   elseif arg_index:is(ast.typed.expr.Binary) then
     if (arg_index.op == "+" or arg_index.op == "-") then
-      return affine.analyze_index_noninterference_self(loop_index, arg_index.lhs, field_name)
-             or affine.analyze_index_noninterference_self(loop_index, arg_index.rhs, field_name)
+      local left = affine.analyze_index_noninterference_self(loop_index, arg_index.lhs, field_name)
+      local right = affine.analyze_index_noninterference_self(loop_index, arg_index.rhs, field_name)
+      -- Q: atElliott, xor??
+      return (left or right) and not (left and right)
+
     elseif arg_index.op == "*" then
       if affine.is_constant_expr(arg_index.lhs) then
         local coeff = affine.convert_constant_expr(arg_index.lhs)

@@ -157,11 +157,151 @@ local function analyze_noninterference_previous(
   return true
 end
 
+--returns coefficient of loop_index. Non-interfering if non-zero
+function analyze_expr_noninterference_self(expression, cx, loop_vars, report_fail, field_name)
+  local expr = strip_casts(expression)
+
+  if expr:is(ast.typed.expr.ID) then
+    if cx:is_loop_variable(expr.value) then
+      for _,loop_var in ipairs(loop_vars) do
+          if loop_var.symbol == expr.value then
+            return analyze_expr_noninterference_self(loop_var.value, cx, loop_vars, report_fail, field_name)
+        end
+      end
+      -- DELETE ME
+      print("analyzing noninterference... something done fucked up with loop var")
+    elseif expr == cx.loop_index then
+      return {
+        value = 1,
+        noninterfering = true,
+        valid = true,
+      }
+    else
+      -- invariant; inconclusive
+      return {
+        value = false,
+        noninterfering = false,
+        valid = true,
+      }
+    end
+
+  elseif expr:is(ast.typed.expr.Binary) then
+    local left_const = affine_helper.is_constant_expr(expr.lhs) and affine_helper.convert_constant_expr(expr.lhs)
+    local right_const = affine_helper.is_constant_expr(expr.rhs) and affine_helper.convert_constant_expr(expr.rhs)
+    local left = left_const and {
+      value = left_const,
+      noninterfering = false,
+      valid = true,
+      } or analyze_expr_noninterference_self(expr.lhs, cx, loop_vars, report_fail, field_name)
+    local right =  right_const and {
+      value = right_const,
+      noninterfering = false,
+      valid = true,
+    } or analyze_expr_noninterference_self(expr.rhs, cx, loop_vars, report_fail, field_name)
+
+
+    if expr.op == "+" then
+      local valid = left.valid and right.valid and ((left.noninterfering ~= right.noninterfering) or (left.value and right.value))
+      return {
+        value = valid and (left.value and right.value)
+                and ((left.valid or right.valid) and ((left.valid and left.value or 0) + (right.valid and right.value or 0))
+                or (left.value + right.value)),
+        noninterfering = valid and (left.noninterfering and right.noninterfering),
+        valid = valid,
+      }
+    
+    elseif expr.op == "-" then
+      local valid = left.valid and right.valid and ((left.noninterfering ~= right.noninterfering) or (left.value and right.value))
+      return {
+        value = valid and (left.value and right.value)
+                and ((left.valid or right.valid) and ((left.valid and left.value or 0) - (right.valid and right.value or 0))
+                or (left.value - right.value)),
+        noninterfering = valid and (left.noninterfering and right.noninterfering),
+        valid = valid,
+      }
+
+    elseif expr.op == "*" then
+      local valid = left.valid and right.valid and (not (left.noninterfering and right.noninterfering)) and ( (left.value or left.noninterfering) and (right.value or right.noninterfering) or (not (left.noninterfering or right.noninterfering)))
+      return {
+        value = valid and (left.value and right.value) and (left.value * right.value),
+        noninterfering = valid and (left.noninterfering or right.noninterfering),
+        valid = valid,
+      }
+      
+    -- TODO: add mod operator check
+    else
+      return {
+        value = false,
+        noninterfering = false,
+        valid = false,
+      }
+    end
+
+  elseif expr:is(ast.typed.expr.Ctor) then
+    -- DELETE ME
+    print("optimize_index_launch noninterself: Ctor")
+    local loop_index_type = cx.loop_index:gettype()
+    if loop_index_type.fields then
+
+      for _, loop_index_field in ipairs(loop_index_type.fields) do
+        -- DELETE ME
+        print("optimize_index_launch Ctor: searching for field "..loop_index_field)
+        local field_present = false
+        for _, ctor_field in ipairs(expr.fields) do
+          local arg_result = analyze_expr_noninterference_self(ctor_field.value, cx, loop_vars, report_fail, loop_index_field)
+          if arg_result.noninterfering and (not arg_result.value or arg_result.value ~= 0) then
+            field_present = true
+            break
+          end
+        end
+        if not field_present then
+          -- DELETE ME
+          print("optimize_index_launch Ctor: field "..loop_index_field.." not found")
+          return {
+            value = false,
+            noninterfering = false,
+            valid = false,
+          }
+        end
+      end
+
+      -- DELETE ME
+      print("optimize_index_launch Ctor: all fields found")
+      return {
+        value = false,
+        noninterfering = true,
+        valid = true,
+      }
+    end
+
+  elseif expr:is(ast.typed.expr.FieldAccess) then
+    local id = expr.value
+    local valid = cx.loop_index == id.value
+                  and field_name == expr.field_name
+    return {
+      value = valid and 1,
+      noninterfering = valid,
+      valid = valid,
+    }
+  end
+
+  return {
+    value = false,
+    noninterfering = false,
+    valid = false,
+  }
+end
+
+local function analyze_index_noninterference_self(expr, cx, loop_vars, report_fail, field_name)
+  local result = analyze_expr_noninterference_self(expr, cx, loop_vars, report_fail, field_name)
+  return result.valid and result.value ~= 0
+end
+
 local function analyze_noninterference_self(
-    cx, task, arg, partition_type, mapping)
+    cx, task, arg, partition_type, mapping, loop_vars)
   local region_type = std.as_read(arg.expr_type)
   if partition_type and partition_type:is_disjoint() and
-    affine_helper.analyze_index_noninterference_self(cx.loop_index, arg.index, nil)
+    analyze_index_noninterference_self(arg.index, cx, loop_vars)
   then
     return true
   end
@@ -510,6 +650,8 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   loop_cx:add_loop_variable(node.symbol)
 
   local preamble = terralib.newlist()
+  -- vars that need to be defined within projection functor
+  local loop_vars = terralib.newlist()
   local call_stat
   for i = 1, #node.block.stats - 1 do
     local stat = node.block.stats[i]
@@ -531,8 +673,12 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     if call_stat == nil then
       if stat.value and not analyze_is_loop_invariant(loop_cx, stat.value) then
         loop_cx:add_loop_variable(stat.symbol)
+        loop_vars:insert(stat)
+        -- DELETE ME
+        preamble:insert(stat)
+      else
+        preamble:insert(stat)
       end
-      preamble:insert(stat)
     end
   end
 
@@ -642,7 +788,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   -- Perform a simpler analysis if the expression is not a task launch
   if not call:is(ast.typed.expr.Call) then
     if call:is(ast.typed.expr.Fill) then
-      if #preamble > 0 then
+      if #preamble > 0 or #loop_vars > 0 then
         report_fail(call, "loop optimization failed: fill must not have any preamble statement")
       end
 
@@ -667,7 +813,8 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
 
       local partition_type = std.as_read(projection.value.expr_type)
       if not (partition_type and partition_type:is_disjoint() and
-         affine_helper.analyze_index_noninterference_self(cx.loop_index, arg.index, nil))
+         analyze_index_noninterference_self(arg.index, cx, loop_vars))
+         -- affine_helper.analyze_index_noninterference_self(cx.loop_index, arg.index, nil))
       then
         report_fail(call, "loop optimization failed: fill target" ..
             " interferes with itself")
@@ -754,7 +901,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
 
         do
           local passed = analyze_noninterference_self(
-            loop_cx, task, arg, partition_type, mapping)
+            loop_cx, task, arg, partition_type, mapping, loop_vars)
           if not passed then
             report_fail(call, "loop optimization failed: argument " .. tostring(i) ..
                 " interferes with itself")
@@ -780,7 +927,8 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     reduce_lhs = reduce_lhs,
     reduce_op = reduce_op,
     args_provably = args_provably,
-    free_variables = free_vars
+    free_variables = free_vars,
+    loop_variables = loop_vars
   }
 end
 
@@ -820,6 +968,7 @@ function optimize_index_launch.stat_for_num(cx, node)
     reduce_op = body.reduce_op,
     args_provably = body.args_provably,
     free_vars = body.free_variables,
+    loop_vars = body.loop_variables,
     annotations = node.annotations,
     span = node.span,
   }
@@ -862,6 +1011,7 @@ function optimize_index_launch.stat_for_list(cx, node)
     reduce_op = body.reduce_op,
     args_provably = body.args_provably,
     free_vars = body.free_variables,
+    loop_vars = body.loop_variables,
     annotations = node.annotations,
     span = node.span,
   }
