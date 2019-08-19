@@ -98,7 +98,7 @@ local function evaluate(node)
   return value
 end
 
-function affine.convert_constant_expr(node)
+function convert_constant_expr(node)
   if node:is(ast.typed.expr.Constant) then
     return convert_terra_constant(node.value)
   elseif node:is(ast.typed.expr.Ctor) then

@@ -94,6 +94,95 @@ function context:is_loop_index(variable)
   return self.loop_index == variable
 end
 
+-- Q: Move to "ast.t"?
+local result = ast.make_factory("result")
+result:inner("node")
+result.node:leaf("Variant", {"coefficient", "domain"}):set_memoize()
+result.node:leaf("MultDim", {"coeff_matrix", "domain"}):set_memoize()
+result.node:leaf("Constant", {"value"}):set_memoize()
+result.node:leaf("Invariant", {}):set_memoize()
+
+-- Q: Move to "data.t"?
+data.matrix = {}
+setmetatable(data.matrix, {__index = data.tuple })
+data.matrix.__index = data.matrix
+
+function data.is_matrix(x)
+  return getmetatable(x) == data.matrix
+end
+
+function data.matrix.__add(a, b)
+  assert(data.is_matrix(a) and data.is_matrix(b))
+-- DELETE ME
+--print("Adding matrices:")
+--for k,v in ipairs(a) do
+--  print(k,v)
+--end
+--for k,v in ipairs(b) do
+--  print(k,v)
+--end
+  local result = data.newmatrix()
+  for i, row in ipairs(a) do
+    local result_row = data.newvector()
+    for j, elem in ipairs(row) do
+-- DELETE ME
+--print("ADD result, insert elem row: "..i..", col: "..j)
+--print(elem)
+--print(b[i][j])
+--      result_row:insert(elem + b[{i, j}])
+      result_row:insert(elem + (b[i][j] or 0))
+    end
+    result:insert(result_row)
+  end
+-- DELETE ME
+--print("ADDING MATRICES RESULT:")
+--for k,v in ipairs(result) do
+--  print(k,v)
+--end
+  return result
+end
+
+function data.matrix.__mul(a, b)
+  if data.is_matrix(a) then
+    assert(type(b) == "number")
+-- DELETE ME
+--print("Multiplying matrix:")
+--for k,v in ipairs(a) do
+--  print(k,v)
+--end
+--print("...by num: "..b)
+    local result = data.newmatrix()
+    for i, row in ipairs(a) do
+      result:insert(b * row)
+    end
+    -- DELETE ME
+    --print("MAT/CONS MULT RESULT:")
+    --for k,v in ipairs(result) do
+    -- print(k,v)
+    --end
+    return result
+  elseif data.is_matrix(b) then
+    return data.matrix.__mul(b,a)
+  end
+  assert(false) -- At least one should have been a matrix
+end
+
+function data.newmatrix(rows, cols)
+  if rows then
+    cols = cols or rows
+    local mat = data.newvector()
+    for i = 1, rows do
+      local row = data.newvector()
+      for j = 1, cols do
+        row:insert(i == j and 1 or 0)
+      end
+      mat:insert(row)
+    end
+    return setmetatable(mat, data.matrix)
+  end
+  return setmetatable( {}, data.matrix)
+end
+
 local function check_privilege_noninterference(cx, task, arg,
                                          other_arg, mapping)
   local region_type = std.as_read(arg.expr_type)
@@ -157,144 +246,270 @@ local function analyze_noninterference_previous(
   return true
 end
 
---returns coefficient of loop_index. Non-interfering if non-zero
+local function add_exprs(lhs, rhs)
+  -- DELETE ME
+  --print("noninterference check: add exprs")
+  if not (lhs and rhs) then
+    --print("noninterference check: add exprs LHS OR RHS FALSE")
+    return false
+  end
+
+  if lhs:is(result.node.MultDim) or rhs:is(result.node.MultDim) then
+    -- DELETE ME
+    --print("noninterference check: add MultDim")
+    --print("                  lhs:")
+    --print(lhs)
+    --print("                  rhs:")
+    --print(rhs)
+    
+    if lhs:is(result.node.MultDim) and rhs:is(result.node.MultDim) then
+      return result.node.MultDim {
+        coeff_matrix = lhs.coeff_matrix + rhs.coeff_matrix,
+        domain = false,
+      }
+
+    elseif lhs:is(result.node.Variant) then
+      return result.node.MultDim {
+        coeff_matrix = lhs.coefficient * data.newmatrix(#rhs.coeff_matrix[1], #rhs.coeff_matrix) + rhs.coeff_matrix,
+        domain = false,
+      }
+    elseif rhs:is(result.node.Variant) then
+      return result.node.MultDim {
+        coeff_matrix = lhs.coeff_matrix + rhs.coefficient * data.newmatrix(#lhs.coeff_matrix[1], #lhs.coeff_matrix),
+        domain = false,
+      }
+    else
+      -- Adding a const or invariant, return MultDim
+      return lhs:is(result.node.MultDim) and lhs or rhs
+    end
+
+  elseif lhs:is(result.node.Variant) or rhs:is(result.node.Variant) then
+    local coeff = lhs:is(result.node.Variant) and lhs.coefficient
+                  or 0 + rhs:is(result.node.Variant) and rhs.coefficient or 0
+    return result.node.Variant {
+      coefficient = coeff,
+      domain = false,
+    }
+
+  elseif lhs:is(result.node.Constant) and rhs:is(result.node.Constant) then
+    return result.node.Constant {
+      value = lhs.value + rhs.value
+    }
+  else
+    -- DELETE ME
+    --print("How did I get here? add expr invariant")
+    --print("                  lhs:")
+    --print(lhs)
+    --print("                  rhs:")
+    --print(rhs)
+    return result.node.Invariant {}
+  end
+end
+
+local function mult_exprs(lhs, rhs)
+  -- DELETE ME
+  --print("noninterference check: mult exprs:")
+  if not (lhs and rhs) then
+    return false
+  end
+
+  if lhs:is(result.node.Constant) and rhs:is(result.node.Constant) then
+    return result.node.Constant {
+      value = lhs.value * rhs.value
+    }
+
+  elseif lhs:is(result.node.Constant) or rhs:is(result.node.Constant) then
+    if rhs:is(result.node.Variant) then
+      return result.node.Variant {
+        coefficient = lhs.value * rhs.coefficient,
+        domain = false,
+      }
+    elseif rhs:is(result.node.MultDim) then
+      return result.node.MultDim {
+        coeff_matrix = lhs.value * rhs.coeff_matrix,
+        domain = false,
+      }
+    elseif rhs:is(result.node.Invariant) then
+      return result.node.Invariant {}
+    end
+    return mult_exprs(rhs, lhs)
+
+  elseif lhs:is(result.node.Invariant) and rhs:is(result.node.Invariant) then
+    return result.node.Invariant {}
+  end
+
+  -- all other combinations invalid
+  return false
+end
+
 function analyze_expr_noninterference_self(expression, cx, loop_vars, report_fail, field_name)
+  if not expression then
+-- DELETE ME
+--print("NONINTERFERENCE EXPR IS FALSE?>")
+    return false
+  end
+
   local expr = strip_casts(expression)
 
   if expr:is(ast.typed.expr.ID) then
-    if cx:is_loop_variable(expr.value) then
+    if cx:is_loop_index(expr.value) then
+      return result.node.Variant {
+        coefficient = 1,
+        domain = false,
+      }
+    elseif cx:is_loop_variable(expr.value) then
       for _,loop_var in ipairs(loop_vars) do
-          if loop_var.symbol == expr.value then
-            return analyze_expr_noninterference_self(loop_var.value, cx, loop_vars, report_fail, field_name)
+        if loop_var.symbol == expr.value then
+          return analyze_expr_noninterference_self(loop_var.value, cx, loop_vars, report_fail, field_name)
         end
       end
-      -- DELETE ME
-      print("analyzing noninterference... something done fucked up with loop var")
-    elseif expr == cx.loop_index then
-      return {
-        value = 1,
-        noninterfering = true,
-        valid = true,
+      assert(false) -- loop_variable should have been found
+    else
+      return result.node.Invariant {}
+    end
+
+  elseif expr:is(ast.typed.expr.Constant) then
+    return result.node.Constant {
+      value = expr.value,
+    }
+
+  elseif expr:is(ast.typed.expr.FieldAccess) then
+    local id = expr.value
+    if cx:is_loop_index(id.value) and field_name == expr.field_name then
+      return result.node.Variant {
+        coefficient = 1,
+        domain = false,
       }
     else
-      -- invariant; inconclusive
-      return {
-        value = false,
-        noninterfering = false,
-        valid = true,
-      }
+      return result.node.Invariant {}
     end
 
   elseif expr:is(ast.typed.expr.Binary) then
-    local left_const = affine_helper.is_constant_expr(expr.lhs) and affine_helper.convert_constant_expr(expr.lhs)
-    local right_const = affine_helper.is_constant_expr(expr.rhs) and affine_helper.convert_constant_expr(expr.rhs)
-    local left = left_const and {
-      value = left_const,
-      noninterfering = false,
-      valid = true,
-      } or analyze_expr_noninterference_self(expr.lhs, cx, loop_vars, report_fail, field_name)
-    local right =  right_const and {
-      value = right_const,
-      noninterfering = false,
-      valid = true,
-    } or analyze_expr_noninterference_self(expr.rhs, cx, loop_vars, report_fail, field_name)
-
+-- DELETE ME
+--print("Binary expr")
+    local lhs = analyze_expr_noninterference_self(expr.lhs, cx, loop_vars, report_fail, field_name)
+    local rhs =  analyze_expr_noninterference_self(expr.rhs, cx, loop_vars, report_fail, field_name)
 
     if expr.op == "+" then
-      local valid = left.valid and right.valid and ((left.noninterfering ~= right.noninterfering) or (left.value and right.value))
-      return {
-        value = valid and (left.value and right.value)
-                and ((left.valid or right.valid) and ((left.valid and left.value or 0) + (right.valid and right.value or 0))
-                or (left.value + right.value)),
-        noninterfering = valid and (left.noninterfering and right.noninterfering),
-        valid = valid,
-      }
+      return add_exprs(lhs, rhs)
     
     elseif expr.op == "-" then
-      local valid = left.valid and right.valid and ((left.noninterfering ~= right.noninterfering) or (left.value and right.value))
-      return {
-        value = valid and (left.value and right.value)
-                and ((left.valid or right.valid) and ((left.valid and left.value or 0) - (right.valid and right.value or 0))
-                or (left.value - right.value)),
-        noninterfering = valid and (left.noninterfering and right.noninterfering),
-        valid = valid,
-      }
+      if rhs:is(result.node.Variant) then
+        rhs.coeffient = -rhs.coefficient
+      elseif rhs:is(result.node.MultDim) then
+        rhs.coeff_matrix = -1 * rhs.coeff_matrix
+      elseif rhs:is(result.node.Constant) then
+        rhs.value = -rhs.value
+      end
+      return add_exprs(lhs, rhs)
 
     elseif expr.op == "*" then
-      local valid = left.valid and right.valid and (not (left.noninterfering and right.noninterfering)) and ( (left.value or left.noninterfering) and (right.value or right.noninterfering) or (not (left.noninterfering or right.noninterfering)))
-      return {
-        value = valid and (left.value and right.value) and (left.value * right.value),
-        noninterfering = valid and (left.noninterfering or right.noninterfering),
-        valid = valid,
-      }
+      return mult_exprs(lhs, rhs)
       
     -- TODO: add mod operator check
     else
-      return {
-        value = false,
-        noninterfering = false,
-        valid = false,
-      }
+-- DELETE ME
+--print("do not recognize this Binary operator")
+      return false
     end
 
   elseif expr:is(ast.typed.expr.Ctor) then
     -- DELETE ME
-    print("optimize_index_launch noninterself: Ctor")
+    --print("optimize_index_launch noninterself: Ctor")
     local loop_index_type = cx.loop_index:gettype()
+
     if loop_index_type.fields then
 
-      for _, loop_index_field in ipairs(loop_index_type.fields) do
-        -- DELETE ME
-        print("optimize_index_launch Ctor: searching for field "..loop_index_field)
-        local field_present = false
-        for _, ctor_field in ipairs(expr.fields) do
-          local arg_result = analyze_expr_noninterference_self(ctor_field.value, cx, loop_vars, report_fail, loop_index_field)
-          if arg_result.noninterfering and (not arg_result.value or arg_result.value ~= 0) then
-            field_present = true
-            break
-          end
+      local coeff_mat = data.newmatrix()
+      for i, ctor_field in ipairs(expr.fields) do
+        local result_row = data.newvector()
+        for j, loop_index_field in ipairs(loop_index_type.fields) do
+          local res = analyze_expr_noninterference_self(ctor_field.value, cx, loop_vars, report_fail, loop_index_field)
+--          if not res then
+--            return false
+--          end
+--          result_row:insert(res:is(result.node.Variant) and res.coefficient or 0)
+          result_row:insert(res and (res:is(result.node.Variant) and res.coefficient or 0))
         end
-        if not field_present then
-          -- DELETE ME
-          print("optimize_index_launch Ctor: field "..loop_index_field.." not found")
-          return {
-            value = false,
-            noninterfering = false,
-            valid = false,
-          }
-        end
+        coeff_mat:insert(result_row)
       end
-
-      -- DELETE ME
-      print("optimize_index_launch Ctor: all fields found")
-      return {
-        value = false,
-        noninterfering = true,
-        valid = true,
+      return result.node.MultDim {
+        coeff_matrix = coeff_mat,
+        domain = false,
       }
     end
-
-  elseif expr:is(ast.typed.expr.FieldAccess) then
-    local id = expr.value
-    local valid = cx.loop_index == id.value
-                  and field_name == expr.field_name
-    return {
-      value = valid and 1,
-      noninterfering = valid,
-      valid = valid,
-    }
   end
 
-  return {
-    value = false,
-    noninterfering = false,
-    valid = false,
-  }
+-- DELETE ME
+--print("Noninterference expr not recognized:")
+--print(expr)
+
+  return false
+end
+
+local function matrix_is_noninterfering(matrix, cx)
+  -- DELETE ME
+--print("Analyzing matrix noninterference. Matrix is "..#matrix.." rows x "..#matrix[1].." cols")
+  local stat = terralib.newlist()
+  for _,_ in ipairs(cx.loop_index:gettype().fields) do
+    stat:insert(false)
+  end
+
+  local stat_avail = terralib.newlist()
+  for i = 1, #matrix do
+    stat_avail:insert(true)
+  end
+
+  local field = 1
+  local row = 1
+
+  while field > 0 do
+    if row > #matrix then
+      field = field -1
+      if field < 1 then
+-- DELETE ME
+--print("returning false")
+        return false
+      end
+      row = stat[field] + 1
+      stat_avail[stat[field]] = true
+    elseif stat_avail[row] and matrix[row][field] and matrix[row][field] ~= 0 then
+      stat[field] = row
+      stat_avail[row] = false
+      if field == #stat then
+-- DELETE ME
+--print("returning true")
+        return true
+      end
+      field = field + 1
+      row = 1
+    else
+      row = row + 1
+    end
+  end
+
+--print("returning false")
+  return false
 end
 
 local function analyze_index_noninterference_self(expr, cx, loop_vars, report_fail, field_name)
-  local result = analyze_expr_noninterference_self(expr, cx, loop_vars, report_fail, field_name)
-  return result.valid and result.value ~= 0
+  local res = analyze_expr_noninterference_self(expr, cx, loop_vars, report_fail, field_name)
+  -- DELETE ME
+--  print("Analyze index noninterference self result:")
+--  print(res)
+  if not res then
+    return false
+  elseif res:is(result.node.Variant) then
+    return res.coefficient ~= 0
+  elseif res:is(result.node.MultDim) then
+    -- TODO: implement real solver
+    -- DELETE ME
+    --for k,v in ipairs(res.coeff_matrix) do
+    --  print(k,v)
+    --end
+    return matrix_is_noninterfering(res.coeff_matrix, cx)
+  end
+  return false
 end
 
 local function analyze_noninterference_self(
@@ -426,9 +641,6 @@ local function analyze_is_loop_invariant_node(cx)
          not cx:is_loop_variable(node.value) and
          not cx:is_free_variable(node.value) then
         cx:add_free_variable(node.value)
-        -- DELETE ME
-        print("optimize_index_launch loop invariant ID?")
-        print(node)
       end
       return not cx:is_loop_variable(node.value)
     elseif node:is(ast.typed.expr.IndexAccess) then
@@ -604,13 +816,13 @@ local function analyze_is_simple_index_expression(cx, node)
 end
 
 local function analyze_is_projectable(cx, arg)
-print("Projectable: is IndexAccess? "..(arg:is(ast.typed.expr.IndexAccess) and "yes" or "no"))
+--print("Projectable: is IndexAccess? "..(arg:is(ast.typed.expr.IndexAccess) and "yes" or "no"))
   -- 1. We can project any index access `p[...]`
   if not arg:is(ast.typed.expr.IndexAccess) then
     return false
   end
 
-print("Projectable: is partition of cross product? "..((std.is_partition(std.as_read(arg.value.expr_type)) or std.is_cross_product(std.as_read(arg.value.expr_type))) and "yes" or "no"))
+--print("Projectable: is partition of cross product? "..((std.is_partition(std.as_read(arg.value.expr_type)) or std.is_cross_product(std.as_read(arg.value.expr_type))) and "yes" or "no"))
   -- 2. As long as `p` is a partition or cross product (otherwise this
   -- is irrelevant, since we wouldn't be producing a region requirement).
   if not (std.is_partition(std.as_read(arg.value.expr_type)) or
@@ -619,7 +831,7 @@ print("Projectable: is partition of cross product? "..((std.is_partition(std.as_
     return false
   end
 
-print("Projectable: is loop invariant? "..(analyze_is_loop_invariant(cx, arg.value) and "yes" or "no"))
+--print("Projectable: is loop invariant? "..(analyze_is_loop_invariant(cx, arg.value) and "yes" or "no"))
   -- 3. And as long as `p` is loop-invariant (we have to index from
   -- the same partition every time).
   if not analyze_is_loop_invariant(cx, arg.value) then
@@ -629,7 +841,7 @@ print("Projectable: is loop invariant? "..(analyze_is_loop_invariant(cx, arg.val
   -- 4. And as long as the index itself is a simple expression of the
   -- loop index.
 
-print("Projectable: is simple index expr (is PROJECTABLE)? "..(analyze_is_simple_index_expression(cx, arg.index) and "yes" or "no"))
+--print("Projectable: is simple index expr (is PROJECTABLE)? "..(analyze_is_simple_index_expression(cx, arg.index) and "yes" or "no"))
 
   return analyze_is_simple_index_expression(cx, arg.index)
 end
@@ -674,11 +886,8 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       if stat.value and not analyze_is_loop_invariant(loop_cx, stat.value) then
         loop_cx:add_loop_variable(stat.symbol)
         loop_vars:insert(stat)
-        -- DELETE ME
-        preamble:insert(stat)
-      else
-        preamble:insert(stat)
       end
+      preamble:insert(stat)
     end
   end
 
@@ -813,7 +1022,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
 
       local partition_type = std.as_read(projection.value.expr_type)
       if not (partition_type and partition_type:is_disjoint() and
-         analyze_index_noninterference_self(arg.index, cx, loop_vars))
+         analyze_index_noninterference_self(projection.index, loop_cx, loop_vars))
          -- affine_helper.analyze_index_noninterference_self(cx.loop_index, arg.index, nil))
       then
         report_fail(call, "loop optimization failed: fill target" ..
@@ -902,6 +1111,11 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
         do
           local passed = analyze_noninterference_self(
             loop_cx, task, arg, partition_type, mapping, loop_vars)
+--DELETE ME
+print()
+print("CHECKING IF THIS ARG INTERFERES WITH SELF: passed?")
+print(passed)
+print()
           if not passed then
             report_fail(call, "loop optimization failed: argument " .. tostring(i) ..
                 " interferes with itself")
