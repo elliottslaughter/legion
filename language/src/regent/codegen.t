@@ -2836,15 +2836,12 @@ local function strip_casts(node)
 end
 
 local function make_partition_projection_functor(cx, expr, loop_index, color_space, free_vars_setup, requirement)
-  -- We assume that there's only one variable, and that it's the loop index.
 
   assert(expr:is(ast.typed.expr.IndexAccess))
 
   -- Strip the index for the purpose of checking if this is the
   -- identity projection functor.
   local stripped_index = strip_casts(expr.index)
---  if stripped_index:is(ast.typed.expr.ID) then
---    assert(stripped_index.value == loop_index)
   if stripped_index:is(ast.typed.expr.ID)
      and stripped_index.value == loop_index then
     return 0 -- Identity projection functor.
@@ -2878,7 +2875,13 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
   -- Generate a projection functor that evaluates `expr`.
   local value = codegen.expr(cx, index):read(cx)
 
-  if requirement and free_vars_setup then
+-- DELETE ME FAR RIGHT
+  if requirement and free_vars_setup then--and #free_vars_setup > 1 then
+-- DELETE ME
+print("codegen: free_vars_setup")
+for k,v in pairs(free_vars_setup) do
+  print(k,v)
+end
     free_vars_setup:insert(quote
       [value.actions];
     end)
@@ -2898,8 +2901,13 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
       return subregion
     end
 
+--DELETE ME
+print("codegen: projection functor:")
+print(partition_functor)
     return std.register_projection_functor(false, false, 0, nil, partition_functor)
 
+  -- create fill projection functor without mappable
+  -- create projection functors with no preamble or free variables without mappable
   else
     local terra partition_functor(runtime : c.legion_runtime_t,
                                   parent : c.legion_logical_partition_t,
@@ -2913,6 +2921,9 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
       return subregion
     end
 
+-- DELETE ME
+print("codegen: NOT mappable projection functor:")
+print(partition_functor)
     return std.register_projection_functor(false, true, 0, nil, partition_functor)
   end
 end

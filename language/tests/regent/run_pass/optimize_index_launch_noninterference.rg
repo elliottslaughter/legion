@@ -80,9 +80,41 @@ task main()
 
    -- simple multi-dimensional index ctors
    __demand(__parallel)
-   for c in cs do
-      func5(pr[int3d{c.x, c.y, 0}], ps[int2d{0,0} + c])
+   for i in cs do
+      func5(pr[int3d{i.x, i.y, 0}], ps[int2d{0,0} + i])
    end
+
+  __demand(__parallel)
+  for i in cs do
+    func2(ps[int2d{0,0} + i])
+  end
+
+  __demand(__parallel)
+  for a in ct do
+    func1(pt[a + 0])
+  end
+
+  __demand(__parallel)
+  for a in ct do
+    func1(pt[0 + a])
+  end
+
+  __demand(__parallel)
+  for B in ct do
+    var temp = 0
+    func1(pt[B + 0])
+  end
+
+--  __demand(__parallel)
+--  for a in ct do
+--    func1(pt[2 + 1 * a - 2])
+--  end
+
+--  __demand(__parallel)
+--  for i in cr do
+--    var temp = int3d{0,0,0}
+--    func3(pr[{0,0,0} + i + {0,0,0}])
+--  end
 
    -- nested loop free variable
 --   for i = 0, 2 do
