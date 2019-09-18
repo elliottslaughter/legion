@@ -3217,7 +3217,6 @@ local function index_launch_free_var_setup(free_vars)
       end)
   end
   return free_vars_setup, free_vars_struct, reg_requirement
-  }
 end
 
 local function expr_call_setup_partition_arg(
