@@ -2835,15 +2835,16 @@ local function strip_casts(node)
   return node
 end
 
-local function make_partition_projection_functor(cx, expr, loop_index, color_space, free_vars_setup, requirement)
-
+local function make_partition_projection_functor(cx, expr, loop_index, color_space,
+                                                 free_vars_setup, requirement)
   assert(expr:is(ast.typed.expr.IndexAccess))
 
   -- Strip the index for the purpose of checking if this is the
   -- identity projection functor.
   local stripped_index = strip_casts(expr.index)
-  if stripped_index:is(ast.typed.expr.ID)
-     and stripped_index.value == loop_index then
+  if stripped_index:is(ast.typed.expr.ID) and
+    stripped_index.value == loop_index
+  then
     return 0 -- Identity projection functor.
   end
 
@@ -3194,9 +3195,11 @@ end
 local function index_launch_free_var_setup(free_vars)
   local free_vars_struct = terralib.types.newstruct()
   free_vars_struct.entries = terralib.newlist()
-  for i,symbol in ipairs(free_vars) do
-    free_vars_struct.entries:insert(
-      { field = tostring(symbol), type = symbol:gettype() })
+  for i, symbol in ipairs(free_vars) do
+    free_vars_struct.entries:insert({
+      field = tostring(symbol),
+      type = symbol:gettype(),
+    })
   end
 
   local free_vars_setup = terralib.newlist()
@@ -3207,16 +3210,13 @@ local function index_launch_free_var_setup(free_vars)
     quote
       var [proj_args_get] = @[&free_vars_struct]([get_args]([reg_requirement], nil))
     end)
-  for i,symbol in ipairs(free_vars) do
+  for i, symbol in ipairs(free_vars) do
     free_vars_setup:insert(
       quote
         var [symbol:getsymbol()] = [proj_args_get].[tostring(symbol)]
       end)
   end
-  return {
-    free_vars_setup = free_vars_setup,
-    free_vars_struct = free_vars_struct,
-    reg_requirement = reg_requirement,
+  return free_vars_setup, free_vars_struct, reg_requirement
   }
 end
 
@@ -3229,10 +3229,8 @@ local function expr_call_setup_partition_arg(
   local coherence_modes = coherences:map(std.coherence_mode)
 
   local set_args = c.legion_index_launcher_set_projection_args
-  local result = index_launch_free_var_setup(free_vars)
-  local free_vars_setup = result.free_vars_setup
-  local free_vars_struct = result.free_vars_struct
-  local reg_requirement = result.reg_requirement
+  local free_vars_setup, free_vars_struct, reg_requirement =
+    index_launch_free_var_setup(free_vars)
 
   free_vars_setup:insertall(loop_vars_setup)
 
@@ -3241,7 +3239,7 @@ local function expr_call_setup_partition_arg(
     quote
       var [proj_args_set]
     end)
-  for i,symbol in ipairs(free_vars) do
+  for i, symbol in ipairs(free_vars) do
     args_setup:insert(
       quote
         [proj_args_set].[tostring(symbol)] = [symbol:getsymbol()]
@@ -3250,6 +3248,7 @@ local function expr_call_setup_partition_arg(
 
   local parent_region =
     cx:region(cx:region(arg_type).root_region_type).logical_region
+
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
     local field_types = privilege_field_types[i]
@@ -9256,7 +9255,6 @@ local function stat_index_fill_setup(cx, node, domain, actions)
   local _ = codegen.expr(cx, region)
   local parent_region =
     cx:region(cx:region(region_type).root_region_type).logical_region
-
   local projection_functor =
     make_partition_projection_functor(cx, region, node.symbol)
 
