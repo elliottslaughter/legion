@@ -2875,13 +2875,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
   -- Generate a projection functor that evaluates `expr`.
   local value = codegen.expr(cx, index):read(cx)
 
--- DELETE ME FAR RIGHT
-  if requirement and free_vars_setup then--and #free_vars_setup > 1 then
--- DELETE ME
-print("codegen: free_vars_setup")
-for k,v in pairs(free_vars_setup) do
-  print(k,v)
-end
+  if requirement and free_vars_setup then
     free_vars_setup:insert(quote
       [value.actions];
     end)
@@ -2901,9 +2895,6 @@ end
       return subregion
     end
 
---DELETE ME
-print("codegen: projection functor:")
-print(partition_functor)
     return std.register_projection_functor(false, false, 0, nil, partition_functor)
 
   -- create fill projection functor without mappable
@@ -2921,9 +2912,6 @@ print(partition_functor)
       return subregion
     end
 
--- DELETE ME
-print("codegen: NOT mappable projection functor:")
-print(partition_functor)
     return std.register_projection_functor(false, true, 0, nil, partition_functor)
   end
 end
