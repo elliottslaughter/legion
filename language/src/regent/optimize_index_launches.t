@@ -126,6 +126,8 @@ end
 function data.matrix.__mul(a, b)
   if data.is_matrix(a) then
     assert(type(b) == "number")
+    if b == 1 then return a end
+
     local result = data.newmatrix()
     for i, row in ipairs(a) do
       result:insert(b * row)
@@ -216,7 +218,7 @@ local function analyze_noninterference_previous(
   return true
 end
 
-local function add_exprs(lhs, rhs, minus)
+local function add_exprs(lhs, rhs, sign)
   if not (lhs and rhs) then
     return false
   end
@@ -224,17 +226,17 @@ local function add_exprs(lhs, rhs, minus)
   if lhs:is(result.node.MultDim) or rhs:is(result.node.MultDim) then
     if lhs:is(result.node.MultDim) and rhs:is(result.node.MultDim) then
       return result.node.MultDim {
-        coeff_matrix = lhs.coeff_matrix + (minus and -1 * rhs.coeff_matrix or rhs.coeff_matrix),
+        coeff_matrix = lhs.coeff_matrix + sign * rhs.coeff_matrix,
       }
 
     elseif lhs:is(result.node.Variant) then
       return result.node.MultDim {
-        coeff_matrix = lhs.coefficient * data.newmatrix(#rhs.coeff_matrix[1], #rhs.coeff_matrix) + (minus and -1 * rhs.coeff_matrix or rhs.coeff_matrix),
+        coeff_matrix = lhs.coefficient * data.newmatrix(#rhs.coeff_matrix[1], #rhs.coeff_matrix) + sign * rhs.coeff_matrix,
       }
 
     elseif rhs:is(result.node.Variant) then
       return result.node.MultDim {
-        coeff_matrix = lhs.coeff_matrix + (minus and -1 * rhs.coefficient or rhs.coefficient) * data.newmatrix(#lhs.coeff_matrix[1], #lhs.coeff_matrix),
+        coeff_matrix = lhs.coeff_matrix + sign * rhs.coefficient * data.newmatrix(#lhs.coeff_matrix[1], #lhs.coeff_matrix),
       }
 
     else
@@ -244,14 +246,14 @@ local function add_exprs(lhs, rhs, minus)
 
   elseif lhs:is(result.node.Variant) or rhs:is(result.node.Variant) then
     local coeff = (lhs:is(result.node.Variant) and lhs.coefficient or 0) +
-      (rhs:is(result.node.Variant) and (minus and -rhs.coefficient or rhs.coefficient) or 0)
+      (rhs:is(result.node.Variant) and sign * rhs.coefficient or 0)
     return result.node.Variant {
       coefficient = coeff,
     }
 
   elseif lhs:is(result.node.Constant) and rhs:is(result.node.Constant) then
     return result.node.Constant {
-      value = lhs.value + (minus and -rhs.value or rhs.value)
+      value = lhs.value + sign * rhs.value
     }
 
   else
@@ -335,14 +337,14 @@ function analyze_expr_noninterference_self(expression, cx, loop_vars, report_fai
     local rhs =  analyze_expr_noninterference_self(expr.rhs, cx, loop_vars, report_fail, field_name)
 
     if expr.op == "+" then
-      return add_exprs(lhs, rhs)
-    
+      return add_exprs(lhs, rhs, 1)
+
     elseif expr.op == "-" then
-      return add_exprs(lhs, rhs, true)
+      return add_exprs(lhs, rhs, -1)
 
     elseif expr.op == "*" then
       return mult_exprs(lhs, rhs)
-      
+
     -- TODO: add mod operator check
     else
       return false
