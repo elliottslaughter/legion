@@ -97,7 +97,7 @@ end
 local result = ast.make_factory("result")
 result:inner("node")
 result.node:leaf("Variant", {"coefficient"}):set_memoize()
-result.node:leaf("MultDim", {"coeff_matrix"}):set_memoize()
+result.node:leaf("MultDim", {"coeff_matrix"})
 result.node:leaf("Constant", {"value"}):set_memoize()
 result.node:leaf("Invariant", {}):set_memoize()
 
@@ -217,13 +217,11 @@ local function analyze_noninterference_previous(
 end
 
 local function add_exprs(lhs, rhs, minus)
-
   if not (lhs and rhs) then
     return false
   end
 
   if lhs:is(result.node.MultDim) or rhs:is(result.node.MultDim) then
-    
     if lhs:is(result.node.MultDim) and rhs:is(result.node.MultDim) then
       return result.node.MultDim {
         coeff_matrix = lhs.coeff_matrix + (minus and -1 * rhs.coeff_matrix or rhs.coeff_matrix),
@@ -233,18 +231,20 @@ local function add_exprs(lhs, rhs, minus)
       return result.node.MultDim {
         coeff_matrix = lhs.coefficient * data.newmatrix(#rhs.coeff_matrix[1], #rhs.coeff_matrix) + (minus and -1 * rhs.coeff_matrix or rhs.coeff_matrix),
       }
+
     elseif rhs:is(result.node.Variant) then
       return result.node.MultDim {
         coeff_matrix = lhs.coeff_matrix + (minus and -1 * rhs.coefficient or rhs.coefficient) * data.newmatrix(#lhs.coeff_matrix[1], #lhs.coeff_matrix),
       }
+
     else
       -- Adding a const or invariant, return MultDim
       return lhs:is(result.node.MultDim) and lhs or rhs
     end
 
   elseif lhs:is(result.node.Variant) or rhs:is(result.node.Variant) then
-    local coeff = (lhs:is(result.node.Variant) and lhs.coefficient or 0) + (rhs:is(result.node.Variant)
-                  and (minus and -rhs.coefficient or rhs.coefficient) or 0)
+    local coeff = (lhs:is(result.node.Variant) and lhs.coefficient or 0) +
+      (rhs:is(result.node.Variant) and (minus and -rhs.coefficient or rhs.coefficient) or 0)
     return result.node.Variant {
       coefficient = coeff,
     }
@@ -253,13 +253,13 @@ local function add_exprs(lhs, rhs, minus)
     return result.node.Constant {
       value = lhs.value + (minus and -rhs.value or rhs.value)
     }
+
   else
     return result.node.Invariant {}
   end
 end
 
 local function mult_exprs(lhs, rhs)
-
   if not (lhs and rhs) then
     return false
   end
@@ -274,13 +274,16 @@ local function mult_exprs(lhs, rhs)
       return result.node.Variant {
         coefficient = lhs.value * rhs.coefficient,
       }
+
     elseif rhs:is(result.node.MultDim) then
       return result.node.MultDim {
         coeff_matrix = lhs.value * rhs.coeff_matrix,
       }
+
     elseif rhs:is(result.node.Invariant) then
       return result.node.Invariant {}
     end
+
     return mult_exprs(rhs, lhs)
 
   elseif lhs:is(result.node.Invariant) and rhs:is(result.node.Invariant) then
@@ -292,7 +295,6 @@ local function mult_exprs(lhs, rhs)
 end
 
 function analyze_expr_noninterference_self(expression, cx, loop_vars, report_fail, field_name)
-
   local expr = strip_casts(expression)
 
   if expr:is(ast.typed.expr.ID) then
@@ -300,6 +302,7 @@ function analyze_expr_noninterference_self(expression, cx, loop_vars, report_fai
       return result.node.Variant {
         coefficient = 1,
       }
+
     elseif cx:is_loop_variable(expr.value) then
       for _, loop_var in ipairs(loop_vars) do
         if loop_var.symbol == expr.value then
@@ -307,6 +310,7 @@ function analyze_expr_noninterference_self(expression, cx, loop_vars, report_fai
         end
       end
       assert(false) -- loop_variable should have been found
+
     else
       return result.node.Invariant {}
     end
@@ -327,7 +331,6 @@ function analyze_expr_noninterference_self(expression, cx, loop_vars, report_fai
     end
 
   elseif expr:is(ast.typed.expr.Binary) then
-
     local lhs = analyze_expr_noninterference_self(expr.lhs, cx, loop_vars, report_fail, field_name)
     local rhs =  analyze_expr_noninterference_self(expr.rhs, cx, loop_vars, report_fail, field_name)
 
@@ -379,7 +382,7 @@ end
 local function matrix_is_noninterfering(matrix, cx)
   local stat = terralib.newlist()
   if cx.loop_index:gettype().fields then
-    for _,_ in ipairs(cx.loop_index:gettype().fields) do
+    for _, _ in ipairs(cx.loop_index:gettype().fields) do
       stat:insert(false)
     end
   else

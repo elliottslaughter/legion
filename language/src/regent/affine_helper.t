@@ -207,6 +207,8 @@ function affine.analyze_index_noninterference_self(loop_index, arg, field_name)
       end
 
       return true
+    else
+      assert(false) -- unreachable?
     end
 
   elseif arg_index:is(ast.typed.expr.FieldAccess) then
