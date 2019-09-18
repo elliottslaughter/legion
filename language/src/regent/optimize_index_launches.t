@@ -76,8 +76,8 @@ end
 
 function context:is_free_variable(variable)
   assert(self.free_variables)
-  for _,elem in ipairs(self.free_variables) do
-    if tostring(elem) == tostring(variable) then
+  for _, elem in ipairs(self.free_variables) do
+    if elem == variable then
       return true
     end
   end
@@ -544,7 +544,7 @@ local function analyze_is_side_effect_free(cx, node)
     node, true)
 end
 
-local function analyze_is_loop_invariant_node(cx, free_vars)
+local function analyze_is_loop_invariant_node(cx)
   return function(node)
     -- Expressions:
     if node:is(ast.typed.expr.ID) then
@@ -623,23 +623,22 @@ local function analyze_is_loop_invariant_node(cx, free_vars)
   end
 end
 
-local function analyze_is_loop_invariant(cx, node, free_vars)
+local function analyze_is_loop_invariant(cx, node)
   return ast.mapreduce_node_postorder(
-    analyze_is_loop_invariant_node(cx, free_vars),
+    analyze_is_loop_invariant_node(cx),
     data.all,
     node, true)
 end
 
 local function collect_free_variables_node(cx)
   return function(node)
-    if node:is(ast.typed.expr.ID) then
-      if --free_vars and
-         not std.is_region(node.value:gettype()) and
-         not std.is_partition(node.value:gettype()) and
-         not cx:is_loop_variable(node.value) and
-         not cx:is_free_variable(node.value) then
-        cx:add_free_variable(node.value)
-      end
+    if node:is(ast.typed.expr.ID) and
+      not std.is_region(node.value:gettype()) and
+      not std.is_partition(node.value:gettype()) and
+      not cx:is_loop_variable(node.value) and
+      not cx:is_free_variable(node.value)
+    then
+      cx:add_free_variable(node.value)
     end
   end
 end
@@ -967,7 +966,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     local mapping = {}
     -- free variables referenced in loop variables (defined in loop preamble)
     -- must be defined for each arg since loop variables defined for each arg
-    for _,var_stat in pairs(loop_vars) do
+    for _, var_stat in ipairs(loop_vars) do
        collect_free_variables(loop_cx, var_stat)
     end
 
