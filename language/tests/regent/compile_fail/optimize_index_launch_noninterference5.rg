@@ -83,6 +83,5 @@ task main()
   for c in ct do
     func1(pt[zero * c])
   end
-   
 end
 regentlib.start(main)

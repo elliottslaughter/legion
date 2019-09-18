@@ -774,7 +774,6 @@ local function analyze_is_projectable(cx, arg)
 
   -- 4. And as long as the index itself is a simple expression of the
   -- loop index.
-
   return analyze_is_simple_index_expression(cx, arg.index)
 end
 
@@ -954,8 +953,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
 
       local partition_type = std.as_read(projection.value.expr_type)
       if not (partition_type and partition_type:is_disjoint() and
-         analyze_index_noninterference_self(projection.index, loop_cx, loop_vars))
-         -- affine_helper.analyze_index_noninterference_self(cx.loop_index, arg.index, nil))
+                analyze_index_noninterference_self(projection.index, loop_cx, loop_vars))
       then
         report_fail(call, "loop optimization failed: fill target" ..
             " interferes with itself")

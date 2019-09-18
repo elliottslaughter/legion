@@ -83,6 +83,5 @@ task main()
     var temp = 2 * i
     func1(pt[ temp - 2 * i + 1])
   end
-   
 end
 regentlib.start(main)
