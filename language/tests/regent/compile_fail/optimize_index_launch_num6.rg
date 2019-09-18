@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_num6.rg:69: loop optimization failed: argument 1 is not provably projectable or invariant
---     f(p_disjoint[(i + 1) % n])
+-- optimize_index_launch_num6.rg:69: loop optimization failed: argument 1 interferes with itself
+--     g(p_disjoint[(i + 1) % n])
 --     ^
 
 import "regent"
@@ -66,7 +66,7 @@ task main()
   -- not optimized: can't analyze loop-variant argument
   __demand(__index_launch)
   for i = 0, n do
-    f(p_disjoint[(i + 1) % n])
+    g(p_disjoint[(i + 1) % n])
   end
 end
 regentlib.start(main)
