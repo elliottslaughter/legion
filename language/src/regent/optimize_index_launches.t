@@ -627,7 +627,7 @@ local function analyze_is_loop_invariant(cx, node, free_vars)
   return ast.mapreduce_node_postorder(
     analyze_is_loop_invariant_node(cx, free_vars),
     data.all,
-    node)
+    node, true)
 end
 
 local function collect_free_variables_node(cx)
