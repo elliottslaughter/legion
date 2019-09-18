@@ -73,74 +73,74 @@ task main()
 
 
    -- simple multi-dimensional index ctors
-   __demand(__parallel)
+   __demand(__index_launch)
    for c in cr do
       func3(pr[int3d{c.x, c.y, c.z}])
    end
 
    -- simple multi-dimensional index ctors
-   __demand(__parallel)
+   __demand(__index_launch)
    for i in cs do
       func5(pr[int3d{i.x, i.y, 0}], ps[int2d{0,0} + i])
    end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for i in cs do
     func2(ps[int2d{0,0} + i])
   end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for a in ct do
     func1(pt[a + 0])
   end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for a in ct do
     func1(pt[0 + a])
   end
 
-  __demand(__parallel)
+  __demand(__index_launch)
   for B in ct do
     var temp = 0
     func1(pt[B + 0])
   end
 
---  __demand(__parallel)
---  for a in ct do
---    func1(pt[2 + 1 * a - 2])
---  end
+ __demand(__index_launch)
+ for a in ct do
+   func1(pt[2 + 1 * a - 2])
+ end
 
---  __demand(__parallel)
---  for i in cr do
---    var temp = int3d{0,0,0}
---    func3(pr[{0,0,0} + i + {0,0,0}])
---  end
+ __demand(__index_launch)
+ for i in cr do
+   var temp = int3d{0,0,0}
+   func3(pr[{0,0,0} + i + {0,0,0}])
+ end
 
    -- nested loop free variable
---   for i = 0, 2 do
---      __demand(__parallel)
---      for c in ct do
---         func2(ps[int2d{c, i}])
---      end
---   end
+  for i = 0, 2 do
+    __demand(__index_launch)
+    for c in ct do
+      func2(ps[int2d{c, i}])
+    end
+  end
 
    var zero = 0
-   __demand(__parallel)
+   __demand(__index_launch)
    for c in ct do
-      func1(pt[zero + c])
+     func1(pt[zero + c])
    end
 
 
    for i = 0, 4 do
-      __demand(__parallel)
-      for c in ct do
-         var temp = c - i
-         func1(pt[temp + i])
-      end
+     __demand(__index_launch)
+     for c in ct do
+       var temp = c - i
+       func1(pt[temp + i])
+     end
    end
 
   -- constant * index
-  __demand(__parallel)
+  __demand(__index_launch)
   for i = 0,2 do
     var temp = 1
     func1(pt[2 * i + temp])

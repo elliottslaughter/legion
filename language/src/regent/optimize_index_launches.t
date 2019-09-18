@@ -301,7 +301,7 @@ function analyze_expr_noninterference_self(expression, cx, loop_vars, report_fai
         coefficient = 1,
       }
     elseif cx:is_loop_variable(expr.value) then
-      for _,loop_var in ipairs(loop_vars) do
+      for _, loop_var in ipairs(loop_vars) do
         if loop_var.symbol == expr.value then
           return analyze_expr_noninterference_self(loop_var.value, cx, loop_vars, report_fail, field_name)
         end
@@ -348,11 +348,10 @@ function analyze_expr_noninterference_self(expression, cx, loop_vars, report_fai
   elseif expr:is(ast.typed.expr.Ctor) then
     local loop_index_type = cx.loop_index:gettype()
 
-    if loop_index_type.fields then
-
-      local coeff_mat = data.newmatrix()
-      for i, ctor_field in ipairs(expr.fields) do
-        local result_row = data.newvector()
+    local coeff_mat = data.newmatrix()
+    for i, ctor_field in ipairs(expr.fields) do
+      local result_row = data.newvector()
+      if loop_index_type.fields then
         for j, loop_index_field in ipairs(loop_index_type.fields) do
           local res = analyze_expr_noninterference_self(ctor_field.value, cx, loop_vars, report_fail, loop_index_field)
           if not res then
@@ -361,12 +360,15 @@ function analyze_expr_noninterference_self(expression, cx, loop_vars, report_fai
           end
           result_row:insert(res and (res:is(result.node.Variant) and res.coefficient or 0))
         end
-        coeff_mat:insert(result_row)
+      else
+        local res = analyze_expr_noninterference_self(ctor_field.value, cx, loop_vars, report_fail, field_name)
+        result_row:insert(res and (res:is(result.node.Variant) and res.coefficient or 0))
       end
-      return result.node.MultDim {
-        coeff_matrix = coeff_mat,
-      }
+      coeff_mat:insert(result_row)
     end
+    return result.node.MultDim {
+      coeff_matrix = coeff_mat,
+    }
   end
 
   return false
@@ -376,7 +378,11 @@ end
 -- Ex: solve Kernel of Matrix and assert only solution is zero vector
 local function matrix_is_noninterfering(matrix, cx)
   local stat = terralib.newlist()
-  for _,_ in ipairs(cx.loop_index:gettype().fields) do
+  if cx.loop_index:gettype().fields then
+    for _,_ in ipairs(cx.loop_index:gettype().fields) do
+      stat:insert(false)
+    end
+  else
     stat:insert(false)
   end
 
